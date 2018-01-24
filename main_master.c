@@ -10,8 +10,8 @@
 #define byte unsigned char
 
 #define PWM_MAX 255
-#define PWM_MIN 60
-#define PWM_SLOPE  0.764
+#define PWM_MIN 30
+#define PWM_SLOPE  0.8825
 
 #define SLAVE_ADRESS 0b0101010
 
@@ -191,6 +191,8 @@ void i2cTransmit(byte adress,byte data)
 
 byte i2cReceive(byte adress)
 {
+    
+    byte data = 0;
     SEN = 1; //set start con
     SSP1IF = 0;
     while(!SSP1IF); //wait for flag to confirm start
@@ -206,6 +208,8 @@ byte i2cReceive(byte adress)
         SSP1IF = 0;
         while(!SSP1IF); //wait for flag to confirm data write
         
+        data = SSPBUF;
+        
         ACKDT = 1;
         ACKEN = 1;
         SSP1IF = 0;
@@ -216,4 +220,5 @@ byte i2cReceive(byte adress)
     SSP1IF = 0;
     while(!SSP1IF); //wait for flag to confirm stop cond
     
+    return data;
 }
