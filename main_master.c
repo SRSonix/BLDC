@@ -9,9 +9,9 @@
 #define ushort unsigned short 
 #define byte unsigned char
 
-#define PWM_MAX 128
-#define PWM_MIN 32
-#define PWM_SLOPE  0.375
+#define PWM_MAX 255
+#define PWM_MIN 60
+#define PWM_SLOPE  0.764
 
 #define SLAVE_ADRESS 0b0101010
 
@@ -41,6 +41,7 @@
 void device_init();
 byte getADCVal();
 void i2cTransmit(byte adress,byte data);
+byte i2cReceive(byte adress);
 
 uint pwmVal = 0;
 
@@ -57,6 +58,10 @@ void main(void) {
         pwmVal = (uint)(getADCVal() * PWM_SLOPE) + PWM_MIN;
         
         i2cTransmit(SLAVE_ADRESS,pwmVal);
+        
+        while(!TMR0IF);
+        TMR0IF = 0;
+        i2cReceive(SLAVE_ADRESS);
     }
 }
 
@@ -174,6 +179,35 @@ void i2cTransmit(byte adress,byte data)
     if(ACKSTAT == 0) //if ack was receaved
     {
         SSPBUF = data;
+        SSP1IF = 0;
+        while(!SSP1IF); //wait for flag to confirm data write
+    }
+    
+    PEN = 1;
+    SSP1IF = 0;
+    while(!SSP1IF); //wait for flag to confirm stop cond
+    
+}
+
+byte i2cReceive(byte adress)
+{
+    SEN = 1; //set start con
+    SSP1IF = 0;
+    while(!SSP1IF); //wait for flag to confirm start
+    
+    SSP1BUF = (unsigned int) (adress << 1) +1; // +1 sets read flag in adress byte
+    SSP1IF = 0;
+    while(!SSP1IF); //wait for flag to confirm adress write
+    
+    if(ACKSTAT == 0) //if ack was receaved
+    {
+        RCEN=1;
+        
+        SSP1IF = 0;
+        while(!SSP1IF); //wait for flag to confirm data write
+        
+        ACKDT = 1;
+        ACKEN = 1;
         SSP1IF = 0;
         while(!SSP1IF); //wait for flag to confirm data write
     }
