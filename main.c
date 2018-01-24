@@ -93,57 +93,18 @@ void main(void) {
           }
     }
     
-    /*
-    for(uint c=0;c<265;c++)
-    {
-          while(!TMR0IF);
-          TMR0IF=0;
-
-          if(!(c% 5))
-          {
-              section++;
-              setOutPhase(section%6);
-          }
-    }
-    
-    for(uint c=0;c<265;c++)
-    {
-          while(!TMR0IF);
-          TMR0IF=0;
-
-          if(!(c% 4))
-          {
-              section++;
-              setOutPhase(section%6);
-          }
-    }
-    
-    for(uint c=0;c<1024;c++)
-    {
-          while(!TMR0IF);
-          TMR0IF=0;
-
-          if(!(c% 3))
-          {
-              section++;
-              setOutPhase(section%6);
-          }
-    }*/
-    
     section = 0;
     
     setOutPhase(10); //phase not in [0; 5] will set all floating
     setInPhase(section%6);
     
     IOCIE = 1;
-    /*
-    for(uint c=0;c<1020;c++)
+    
+    for(uint c=0;c<64;c++)
     {
           while(!TMR0IF);
           TMR0IF=0;
     }
-     */
-    
     
     while(1)
     {
@@ -184,44 +145,43 @@ void interrupt tc_int(void)
     {
         IOCAF = 0;
         
-        //if(checkInPhase(section))
-        {
-            IOCIE = 0;
+        
+        IOCIE = 0;
              
-            PHASE_OUT = !PHASE_OUT;
-            NOP();
-            PHASE_OUT = !PHASE_OUT;
+        PHASE_OUT = !PHASE_OUT;
+        NOP();
+        PHASE_OUT = !PHASE_OUT;
 
 
-    #if 0
-            int t4 = TMR4 << 2;
-            sectionLength4 += (t4 - sectionLength4) >> 2;
-            sectionLenth = (ushort)(sectionLength4>>2);
-    #else     
-            sectionLenth = ( ((uint)TMR4 >> 1) + (sectionLenth >> 1));
-    #endif
+#if 0
+        int t4 = TMR4 << 2;
+        sectionLength4 += (t4 - sectionLength4) >> 2;
+        sectionLenth = (ushort)(sectionLength4>>2);
+#else     
+        sectionLenth = ( ((uint)TMR4 >> 1) + (sectionLenth >> 1));
+#endif
 
-            TMR4 = 0;
-
-
-          /*  if(delay)
-            {
-                TMR6 = 255 - ( (sectionLenth >> 1) - (sectionLenth >> 2) ) ;
-                TMR6ON = 1; 
-            }
-            else*/
-            {
-
-                section++;
-                setSection(section%6);  
-            }
+        TMR4 = 0;
 
 
-            PHASE_OUT = !PHASE_OUT;
-            NOP();
-            PHASE_OUT = !PHASE_OUT;
+      /*  if(delay)
+        {
+            TMR6 = 255 - ( (sectionLenth >> 1) - (sectionLenth >> 2) ) ;
+            TMR6ON = 1; 
         }
+        else*/
+        {
+
+            section++;
+            setSection(section%6);  
+        }
+
+
+        PHASE_OUT = !PHASE_OUT;
+        NOP();
+        PHASE_OUT = !PHASE_OUT;
     }
+    
     
     /*
     if(TMR6IF && TMR6IE)
