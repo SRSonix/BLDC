@@ -32,6 +32,8 @@
 
 #define PWM_MAX 320
 
+#define ADRESS 0b0101010
+
 // PIC16F1828 Configuration Bit Settings
 
 // CONFIG1
@@ -141,12 +143,38 @@ void main(void) {
           TMR0IF=0;
     }
      */
-    SSP1IE = 1;
     
     
     while(1)
     {
-        
+        if(SSP1IF)
+        {          
+             SSP1IF=0;
+
+             if(WCOL || SSPOV)
+             {
+                 WCOL=0;
+                 SSPOV=0;
+             }
+
+
+             if( R_nW )  //read recived
+             {
+                if( !(D_nA) || !(ACKSTAT)) //last was adress or ack was read
+                {
+                    SSP1BUF= sectionLenth ;
+                    CKP = 1;
+                }
+             }
+             else
+             {
+                 ushort buf = SSP1BUF; 
+                 if( D_nA )//last adress was data
+                 {
+                    setPWM(buf);
+                 }
+             }
+        }
     }
 }
 
@@ -154,40 +182,45 @@ void interrupt tc_int(void)
 {
     if(IOCAF && IOCIE)
     {
-        PHASE_OUT = !PHASE_OUT;
-        NOP();
-        PHASE_OUT = !PHASE_OUT;
-        
         IOCAF = 0;
-        IOCIE = 0;
-       
-#if 0
-        int t4 = TMR4 << 2;
-        sectionLength4 += (t4 - sectionLength4) >> 2;
-        sectionLenth = (ushort)(sectionLength4>>2);
-#else     
-        sectionLenth = ( ((uint)TMR4 >> 1) + (sectionLenth >> 1));
-#endif
         
-        TMR4 = 0;
-        
-        
-      /*  if(delay)
+        //if(checkInPhase(section))
         {
-            TMR6 = 255 - ( (sectionLenth >> 1) - (sectionLenth >> 2) ) ;
-            TMR6ON = 1; 
+            IOCIE = 0;
+             
+            PHASE_OUT = !PHASE_OUT;
+            NOP();
+            PHASE_OUT = !PHASE_OUT;
+
+
+    #if 0
+            int t4 = TMR4 << 2;
+            sectionLength4 += (t4 - sectionLength4) >> 2;
+            sectionLenth = (ushort)(sectionLength4>>2);
+    #else     
+            sectionLenth = ( ((uint)TMR4 >> 1) + (sectionLenth >> 1));
+    #endif
+
+            TMR4 = 0;
+
+
+          /*  if(delay)
+            {
+                TMR6 = 255 - ( (sectionLenth >> 1) - (sectionLenth >> 2) ) ;
+                TMR6ON = 1; 
+            }
+            else*/
+            {
+
+                section++;
+                setSection(section%6);  
+            }
+
+
+            PHASE_OUT = !PHASE_OUT;
+            NOP();
+            PHASE_OUT = !PHASE_OUT;
         }
-        else*/
-        {
-            
-            section++;
-            setSection(section%6);  
-        }
-        
-        
-        PHASE_OUT = !PHASE_OUT;
-        NOP();
-        PHASE_OUT = !PHASE_OUT;
     }
     
     /*
@@ -200,33 +233,6 @@ void interrupt tc_int(void)
         setSection(section%6);      
     }
     */
-    
-    
-    if(SSP1IF && SSP1IE)
-    {          
-         SSP1IF=0;
-
-         if(WCOL || SSPOV)
-         {
-             WCOL=0;
-             SSPOV=0;
-         }
-
-
-         if( R_nW )  //read recived
-         {
-            if( !(D_nA) || !(ACKSTAT)) //last was adress or ack was read
-            {
-                SSP1BUF= sectionLenth ;
-                CKP = 1;
-            }
-         }
-         else
-         {
-             setPWM(SSP1BUF);
-         }
-         
-    }
 }
 
 void device_init()
@@ -287,6 +293,7 @@ void device_init()
     //set all high logic levels to high levels fpr comperator inputs
     INLVLA = 0b111;
     
+    //set all output lats to 0
     LATA = 0;
     LATB = 0;
     LATC = 0;
@@ -297,7 +304,7 @@ void device_init()
             0b00 << _CCP2CON_P2M_POSITION ; // singe output
             
     setPWM(0);
-    //configure tmr2 for ccp2
+    //configure tmr2 for ccp2 pwm
     CCPTMRS0 &= ~_CCPTMRS0_C2TSEL_MASK; // mask c2tsel
     CCPTMRS0 |= 0x00 << _CCPTMRS0_C2TSEL_POSITION; //set c2tsel
     T2CON=  0b00 << _T2CON_T2CKPS_POSITION |    //tmr2 prescale 1
@@ -308,7 +315,7 @@ void device_init()
              1 << _INTCON_PEIE_POSITION;  //Periferal interrupt enable
     
       //I2c slave mode 
-    SSP1ADD = 0b0101010 << 1;  // 7 bit adress
+    SSP1ADD = ADRESS << 1;  // 7 bit adress
     
     SSP1STAT =  1 << _SSP1STAT_SMP_POSITION | //standard speed mode
                 0 << _SSP1STAT_CKE_POSITION; //somethign with SMbus specific... ?
