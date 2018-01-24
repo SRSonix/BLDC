@@ -284,6 +284,9 @@ void device_init()
             0 << _ANSELC_ANSC6_POSITION |       //ansel a6
             0 << _ANSELC_ANSC7_POSITION;        //ansel a7
     
+    //set all high logic levels to high levels fpr comperator inputs
+    INLVLA = 0b111;
+    
     LATA = 0;
     LATB = 0;
     LATC = 0;
