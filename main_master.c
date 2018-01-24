@@ -10,8 +10,8 @@
 #define byte unsigned char
 
 #define PWM_MAX 255
-#define PWM_MIN 30
-#define PWM_SLOPE  0.8825
+#define PWM_MIN 23
+#define PWM_SLOPE  0.9099
 
 #define SLAVE_ADRESS 0b0101010
 
