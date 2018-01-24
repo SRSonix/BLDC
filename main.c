@@ -7,6 +7,9 @@
 
 #define uint unsigned int 
 #define ushort unsigned short 
+#define bool unsigned char
+#define true 1
+#define false 0
 
 #define PHASE_FLOAT 0
 #define PHASE_PULL 1
@@ -64,15 +67,16 @@ void setSection(uint section);
 char send= '0';
 
 uint section = 0;
-ushort sectionLenth = 0; //in multiples of tmr2 tocs = fosc/4/64
-ushort sectionLenthTP = 0;
+int sectionLength4 = 0;
+uint sectionLenth = 0; //in multiples of tmr2 tocs = fosc/4/64
 
 ushort secLengthDes = 20; 
 ushort pwmVal = 0;
+bool delay = false;
 
 void main(void) {
     device_init();
-    setPWMperc(0.45);
+    setPWMperc(0.15);
     
     
     for(uint c=0;c<265;c++)
@@ -87,7 +91,7 @@ void main(void) {
           }
     }
     
-    
+    /*
     for(uint c=0;c<265;c++)
     {
           while(!TMR0IF);
@@ -122,23 +126,23 @@ void main(void) {
               section++;
               setOutPhase(section%6);
           }
-    }
+    }*/
     
-    section++;
-    C1ON = 1;
+    section = 0;
     
     setOutPhase(10); //phase not in [0; 5] will set all floating
     setInPhase(section%6);
     
-    C1IF = 0;
-    C1IE = 1;
-    
+    IOCIE = 1;
+    /*
     for(uint c=0;c<1020;c++)
     {
           while(!TMR0IF);
           TMR0IF=0;
     }
+     */
     SSP1IE = 1;
+    
     
     while(1)
     {
@@ -148,19 +152,45 @@ void main(void) {
 
 void interrupt tc_int(void)
 {
-    if(C1IF && C1IE)
+    if(IOCAF && IOCIE)
     {
-        C1IF = 0;
-        C1IE = 0;
+        PHASE_OUT = !PHASE_OUT;
+        NOP();
+        PHASE_OUT = !PHASE_OUT;
         
-        sectionLenth = (((unsigned int)TMR4) >> 1) + (sectionLenth >> 1);
+        IOCAF = 0;
+        IOCIE = 0;
+       
+#if 0
+        int t4 = TMR4 << 2;
+        sectionLength4 += (t4 - sectionLength4) >> 2;
+        sectionLenth = (ushort)(sectionLength4>>2);
+#else     
+        sectionLenth = ( ((uint)TMR4 >> 1) + (sectionLenth >> 1));
+#endif
         
         TMR4 = 0;
         
-        TMR6 = 255 - (sectionLenth >> 1);
-        TMR6ON = 1;
+        
+      /*  if(delay)
+        {
+            TMR6 = 255 - ( (sectionLenth >> 1) - (sectionLenth >> 2) ) ;
+            TMR6ON = 1; 
+        }
+        else*/
+        {
+            
+            section++;
+            setSection(section%6);  
+        }
+        
+        
+        PHASE_OUT = !PHASE_OUT;
+        NOP();
+        PHASE_OUT = !PHASE_OUT;
     }
     
+    /*
     if(TMR6IF && TMR6IE)
     {
         TMR6IF=0;
@@ -169,11 +199,11 @@ void interrupt tc_int(void)
         section++;
         setSection(section%6);      
     }
+    */
     
     
     if(SSP1IF && SSP1IE)
     {          
-        PHASE_OUT=!PHASE_OUT;
          SSP1IF=0;
 
          if(WCOL || SSPOV)
@@ -196,7 +226,6 @@ void interrupt tc_int(void)
              setPWM(SSP1BUF);
          }
          
-       PHASE_OUT=!PHASE_OUT;
     }
 }
 
@@ -215,7 +244,7 @@ void device_init()
     // tris 1 in 0 out
     TRISA=  1 << _TRISA_TRISA0_POSITION |       //tris a0
             1 << _TRISA_TRISA1_POSITION |       //tris a1
-            0 << _TRISA_TRISA2_POSITION |       //tris a2
+            1 << _TRISA_TRISA2_POSITION |       //tris a2
             1 << _TRISA_TRISA4_POSITION |       //tris a4
             0 << _TRISA_TRISA5_POSITION;        //tris a5
     
@@ -302,12 +331,12 @@ void device_init()
             0b11 << _OPTION_REG_PS_POSITION; // tmr 0 prescale is 16
      
     //tmr4 for measuring section length
-    T4CON=  0b00 << _T2CON_T2CKPS_POSITION |    //tmr6 prescale 64
+    T4CON=  0b11 << _T2CON_T2CKPS_POSITION |    //tmr6 prescale 64
             1 << _T2CON_TMR2ON_POSITION |        //tmr6 enable
-            0 << _T2CON_T2OUTPS_POSITION;  //tmr postscale 1
+            0 << _T2CON_T2OUTPS_POSITION;  //tmr postscale 3
     
     //tmr6 delay section swith trigger by half a section
-    T6CON=  0b00 << _T6CON_T6CKPS_POSITION |    //tmr6 prescale 64
+    T6CON=  0b11 << _T6CON_T6CKPS_POSITION |    //tmr6 prescale 64
             0 << _T6CON_TMR6ON_POSITION |        //tmr6 enable
             0 << _T6CON_T6OUTPS_POSITION;  //tmr postscale 1
     
@@ -321,18 +350,9 @@ void device_init()
              0b110 << _ADCON1_ADCS_POSITION; //clocl fosc/64 = 2ns at fosc 32mhz
             */
     
-    //comperator
-    CM1CON0 = 0 << _CM1CON0_C1ON_POSITION | //enable c1
-              1 << _CM1CON0_C1OE_POSITION   |  //enable c1out on RA2
-              1 << _CM1CON0_C1POL_POSITION | // invert C1 
-              1 << _CM1CON0_C1SP_POSITION | // hith speed mode
-              0 << _CM1CON0_C1HYS_POSITION | //hysteresis enabled
-              0 << _CM1CON0_C1SYNC_POSITION; // c1 is synced with timr1
-    
-    CM1CON1 = 1 << _CM1CON1_C1INTP_POSITION | //enable seting of C1IF on positive flank
-              1 << _CM1CON1_C1INTN_POSITION | //enable seting of C1IF on negative flank
-              0 << _CM1CON1_C1PCH_POSITION | // C1IN+ as pos channel
-              0 << _CM1CON1_C1NCH_POSITION; // C12IN1- as neg channel (phase 0:A 1:B 2:C)
+    //IOC on A0 A1 A2 for phases ABC
+    IOCAP = 0; // disactive for 0,1,2
+    IOCAN = 0; // disactive for 0,1,2
 }
 
 void setPWMperc(float percent)
@@ -361,15 +381,15 @@ float getADCPercentage()
 
 void setSection(uint section)
 {
-    C1IE = 0;
+    IOCIE = 0;
     
     setOutPhase(section);
     setInPhase(section);
     
-//    for(uint i=0;i<0;i++) NOP();  // kickback avoid
+   // for(uint i=0;i<8;i++) NOP();  // 1 iteration is 1.8 us kickback avoid
     
-    C1IF = 0;
-    C1IE = 1;
+    IOCAF = 0;
+    IOCIE = 1;
 }
 
 void setOutPhase(uint phase)
@@ -389,6 +409,7 @@ void setOutPhase(uint phase)
 
         break;
     case 1:        
+        PHASE_OUT=0;
         PHASE_B_FLOAT = PHASE_FLOAT;
         
         PHASE_C_FLOAT = PHASE_PULL;
@@ -399,6 +420,7 @@ void setOutPhase(uint phase)
 
         break;
     case 2:
+        PHASE_OUT=1;
         PHASE_A_FLOAT = PHASE_FLOAT;
         
         PHASE_C_FLOAT = PHASE_PULL;
@@ -421,6 +443,7 @@ void setOutPhase(uint phase)
 
         break;
     case 4:
+        PHASE_OUT=1;
         PHASE_B_FLOAT = PHASE_FLOAT;
         
         PHASE_A_FLOAT = PHASE_PULL;
@@ -431,6 +454,7 @@ void setOutPhase(uint phase)
         
         break;
     case 5:
+        PHASE_OUT=0;
         PHASE_A_FLOAT = PHASE_FLOAT;
         
         PHASE_B_FLOAT = PHASE_PULL;
@@ -438,32 +462,41 @@ void setOutPhase(uint phase)
         
         PHASE_C_FLOAT = PHASE_PULL;
         PHASE_C_HL = PHASE_HIGH;
-
+ 
         break;
+        
     default:
         PHASE_A_FLOAT = PHASE_FLOAT;
         PHASE_B_FLOAT = PHASE_FLOAT;
         PHASE_C_FLOAT = PHASE_FLOAT;
+            
     }
 }
 
 void setInPhase(uint phase)
 {
-    C1NCH0 = 0;
-    C1NCH1 = 0;
+    IOCAP = 0; // disactive for 0,1,2
+    IOCAN = 0; // disactive for 0,1,2
     
     switch(phase)
     {
-    case 0: //phase c: C1NCH == 2  neg
-    case 3:
-        C1NCH1 = 1;
+    case 0: //phase c:   neg
+        IOCAN2 = 1;
         break;
-    case 1://phase b: C1NCH == 1 pos
-    case 4:
-        C1NCH0 = 1;    
+    case 1: //phase b:  pos
+        IOCAP1 = 1;
         break;
-    case 2: //phase a: C1NCH == 0 neg
-    case 5:
+    case 2: //phase a:  neg
+        IOCAN0 = 1;
+        break;
+    case 3: //phase c:   pos
+        IOCAP2 = 1;
+        break;
+    case 4: //phase b:  neg
+        IOCAN1 = 1;
+        break;
+    case 5: //phase a:  pos
+        IOCAP0 = 1;
         break;
     }
 }
