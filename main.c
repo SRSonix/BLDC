@@ -173,6 +173,7 @@ void interrupt tc_int(void)
     
     if(SSP1IF && SSP1IE)
     {          
+        PHASE_OUT=!PHASE_OUT;
          SSP1IF=0;
 
          if(WCOL || SSPOV)
@@ -181,18 +182,21 @@ void interrupt tc_int(void)
              SSPOV=0;
          }
 
-         ushort buf=SSP1BUF;
 
-         if( R_nW &&  //read recived
-                 ( !(D_nA) || !(ACKSTAT)) ) //last was adress or ack was read
+         if( R_nW )  //read recived
          {
-             SSP1BUF= sectionLenth ;
+            if( !(D_nA) || !(ACKSTAT)) //last was adress or ack was read
+            {
+                SSP1BUF= sectionLenth ;
+                CKP = 1;
+            }
          }
          else
          {
-             setPWM((ushort)(
-                     buf*2));
+             setPWM(SSP1BUF);
          }
+         
+       PHASE_OUT=!PHASE_OUT;
     }
 }
 
@@ -313,7 +317,6 @@ void device_init()
     //adc
    /* ADCON0= 4 << _ADCON0_CHS_POSITION | // chanel 4 select
             1 << _ADCON0_ADON_POSITION; //adc on
-
     ADCON1 = 0 << _ADCON1_ADFM_POSITION | // left justified
              0b110 << _ADCON1_ADCS_POSITION; //clocl fosc/64 = 2ns at fosc 32mhz
             */
@@ -437,6 +440,10 @@ void setOutPhase(uint phase)
         PHASE_C_HL = PHASE_HIGH;
 
         break;
+    default:
+        PHASE_A_FLOAT = PHASE_FLOAT;
+        PHASE_B_FLOAT = PHASE_FLOAT;
+        PHASE_C_FLOAT = PHASE_FLOAT;
     }
 }
 
