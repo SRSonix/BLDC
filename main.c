@@ -1,22 +1,31 @@
 /*
  * File:   main.c
  * Author: Michael Meissner
+ * mail: michi.meissner@tum.de
  *
  * Created on 29. Oktober 2017, 11:38
  */
 
+//type definitions
 #define uint unsigned int 
 #define ushort unsigned short 
 #define bool unsigned char
 #define true 1
 #define false 0
 
+typedef enum{
+    normal = 0,
+    fieldweaken
+}mode;
+
+//defines of the PHASE Pin values
 #define PHASE_FLOAT 0
 #define PHASE_PULL 1
 
 #define PHASE_HIGH 1
 #define PHASE_LOW 0
 
+//defines of the phase pins
 #define PHASE_A_FLOAT LATA5
 #define PHASE_A_HL TRISA4 
 #define PHASE_B_FLOAT LATC5
@@ -30,12 +39,13 @@
 
 #define PHASE_OUT LATC0
 
+//define of the PWM duty circle 100% device should be initialized accordingly
 #define PWM_MAX 320
 
+//adress of the device
 #define ADRESS 0b0101010
 
 // PIC16F1828 Configuration Bit Settings
-
 // CONFIG1
 #pragma config FOSC = INTOSC    // Oscillator Selection (INTOSC oscillator: I/O function on CLKIN pin)
 #pragma config WDTE = OFF       // Watchdog Timer Enable (WDT disabled)
@@ -55,33 +65,40 @@
 #pragma config BORV = HI        // Brown-out Reset Voltage Selection (Brown-out Reset Voltage (Vbor), high trip point selected.)
 #pragma config LVP = OFF        // Low-Voltage Programming Enable (High-voltage on MCLR/VPP must be used for programming)
 
+//xc device header
 #include <xc.h>
 
+//inits the device: inits tmr 0,4,6,PWM module(using tmr2), pin configuration, osccilator, interrupts, I2C
 void device_init();
-void setPWMperc(float percent);
+//sets pem duty circle to a certain value [0 PWM_MAX]
 void setPWM(ushort pwm_cycle);
-float getADCPercentage();
 
-void setOutPhase(uint phase);
-void setInPhase(uint phase);
+//sets phase outputs accortding to section [0,5]. sets all phases floating else
+void setOutSection(uint section);
+//sets IOC interrupt to right pin and flank direction accorting to section [0,5] disables IOC else
+void setInSection(uint section);
+// deactivates IOC, calls setOutSection(),setInSction(), reactivates IOC
 void setSection(uint section);
 
-char send= '0';
-
+//section the motor is in
 uint section = 0;
+// length of a section with first order TP. in multibles of tmr 4 tics = 4*64/fosc
+uint sectionLenth = 0;
+// 4* section length for higher order TP currently unused. in multibles of tmr 4 tics = 4*64/fosc
 int sectionLength4 = 0;
-uint sectionLenth = 0; //in multiples of tmr2 tocs = fosc/4/64
 
-ushort secLengthDes = 20; 
+//current value of pwm
 ushort pwmVal = 0;
-bool delay = false;
+//current mode
+mode curr_mode = fieldweaken;
 
 void main(void) {
+    //init device and set starting PWM level
     device_init();
-    setPWMperc(0.15);
+    setPWM(48);
     
-    
-    for(uint c=0;c<265;c++)
+    //300 steps of forced commutation
+    for(uint c=0;c<300;c++)
     {
           while(!TMR0IF);
           TMR0IF=0;
@@ -89,25 +106,25 @@ void main(void) {
           if(!(c% 10))
           {
               section++;
-              setOutPhase(section%6);
+              setOutSection(section%6);
           }
     }
     
-    section = 0;
+    //set up for free commutation start
+    setOutSection(10); //set all phases floating
+    setInSection(section%6);//select right input level
     
-    setOutPhase(10); //phase not in [0; 5] will set all floating
-    setInPhase(section%6);
-    
-    IOCIE = 1;
-    
-    
+    IOCIE = 1;//enable IOC interrupt for free commutation
+        
+    //wait for some time (512*8us) and swich to normal commutation mode
     for(uint c=0;c<512;c++)
     {
           while(!TMR0IF);
           TMR0IF=0;
     }
-    delay = true;
+    curr_mode = normal;
     
+    //wait for some time (512*8us) before start of comunicatioon
     for(uint c=0;c<512;c++)
     {
           while(!TMR0IF);
@@ -116,102 +133,115 @@ void main(void) {
     
     while(1)
     {
+        //I2C communication: if I2C iflag is set
         if(SSP1IF)
-        {          
-             SSP1IF=0;
+        {    
+            //reset I2C flag
+            SSP1IF=0;
 
-             if(WCOL || SSPOV)
-             {
-                 WCOL=0;
-                 SSPOV=0;
-             }
+            //clear error flags
+            if(WCOL || SSPOV)
+            {
+                WCOL=0;
+                SSPOV=0;
+            }
 
-
-             if( R_nW )  //read recived
-             {
-                if( !(D_nA) || !(ACKSTAT)) //last was adress or ack was read
+            if( R_nW )  //read recived
+            {
+               if( !(D_nA) || !(ACKSTAT)) //last was adress or ack was read
+               {
+                   //write transmit sectionLength and stop clock abitration
+                   SSP1BUF= sectionLenth ;
+                   CKP = 1;
+               }
+            }
+            else //write request reciefed
+            { 
+                ushort buf = SSP1BUF; 
+                if( D_nA )//last adress was data
                 {
-                    SSP1BUF= sectionLenth ;
-                    CKP = 1;
+                   //read data and set PWM accordingly  
+                   setPWM(buf);
                 }
-             }
-             else
-             {
-                 ushort buf = SSP1BUF; 
-                 if( D_nA )//last adress was data
-                 {
-                    setPWM(buf);
-                 }
-             }
+            }
         }
     }
 }
 
+//interrupt service routine
 void interrupt tc_int(void)
 {
+    //Interrupt on change was detected on floating phase
     if(IOCAF && IOCIE)
     {
         IOCAF = 0;
-        
-        
+        //turn of IOC until next phase IOC will be turned on in setInputSection called by setSection 
         IOCIE = 0;
              
+        //toggle PIN for debug
         PHASE_OUT = !PHASE_OUT;
         NOP();
         PHASE_OUT = !PHASE_OUT;
 
-
-#if 0
+//this enables higher order lowpass for sectionLength. makes kommutation slower
+#if 0   
+        //higher order LP of sectionLength measured by TMR4 tocs
         int t4 = TMR4 << 2;
         sectionLength4 += (t4 - sectionLength4) >> 2;
         sectionLenth = (ushort)(sectionLength4>>2);
 #else     
+        //first order LP of sectionLength measured in TMR4 tocs
         sectionLenth = ( ((uint)TMR4 >> 1) + (sectionLenth >> 1));
 #endif
 
+        //restart TMR4 to time next section length
         TMR4 = 0;
 
-
-        if(delay)
+        if(curr_mode == normal) //mode is normal mode with commutation timing
         {
-            int delay = (sectionLenth >> 1) - 9;
-            if(delay > 0)
+            //calculate delay in TMR6 tocs (each aprox. 8us): sectionLength/2 + swichtime
+            //measured time to swich section (runing of setSection() method) is approx 70 us. 9 timer  tics are approx 72 us
+            int delay = (sectionLenth >> 1) - 9; 
+            if(delay > 0) //if delay positive
             {
-                TMR6 = 255 - ( delay ) ; // time to calc is approx 70 us. 10 timer tics are 80 us
-
+                //set TMR6 value and turn on timer
+                TMR6 = (ushort)(255 - ( delay )) ; 
                 TMR6ON = 1; 
             }
-            else
+            else //if delay negative
             {
+                //swich section right away
                 section++;
                 setSection(section%6);   
             }
         }
-        else
+        else // mode is fielweaken
         {
+            //swich section as soon as IOC is detected. no TMR6 action
             section++;
             setSection(section%6);  
         }
 
-
+        //toggle pin for debug
         PHASE_OUT = !PHASE_OUT;
         NOP();
         PHASE_OUT = !PHASE_OUT;
     }
     
-    
-    
+    //if TMR6 interrupt
     if(TMR6IF && TMR6IE)
     {
         TMR6IF=0;
+        //turn off tmr6 (will be turned on in IOC)
         TMR6ON = 0;
         
+        //advance section
         section++;
         setSection(section%6);      
     }
-    
 }
 
+//init of all functions
 void device_init()
 {
      // oscilator control
@@ -221,7 +251,7 @@ void device_init()
     
     //alternative pin fnk contr
     APFCON0=0;
-    APFCON1= 0 << _APFCON1_CCP2SEL_POSITION;
+    APFCON1=0;
     
     //Port a config
     // tris 1 in 0 out
@@ -342,50 +372,44 @@ void device_init()
     IOCAN = 0; // disactive for 0,1,2
 }
 
-void setPWMperc(float percent)
-{
-    unsigned int pwm_cycle=(unsigned int) (320*percent);
-    setPWM(pwm_cycle);
-}
-
+//sets PWM dutcycle to the value
 void setPWM(ushort pwm_cycle)
 {
+    //check if val in bounds
     if(pwm_cycle > PWM_MAX) pwm_cycle = PWM_MAX;
     
+    //set val to right regisers
     DC2B0=pwm_cycle;
     DC2B1=pwm_cycle >> 1;
     CCPR2L = pwm_cycle >> 2;
+    //set global variable to save current PWM dutycycle value
     pwmVal = pwm_cycle;
 }
 
-float getADCPercentage()
-{
-    GO_nDONE = 1;
-    while(GO_nDONE);
-    return ADRESH  / 255.0;
-}
-
-
+//sets section to value
 void setSection(uint section)
 {
+    //deactivate IOC
     IOCIE = 0;
     
-    setOutPhase(section);
-    setInPhase(section);
+    //set Phases outputs to drive phases according to section plan
+    setOutSection(section);
+    //sets IOC to listen to right phase according to section plan
+    setInSection(section);
     
-   // for(uint i=0;i<8;i++) NOP();  // 1 iteration is 1.8 us kickback avoid
-    
+    //turn on IOC
     IOCAF = 0;
     IOCIE = 1;
 }
 
-void setOutPhase(uint phase)
+//sets phase outputs accrding to section plan
+void setOutSection(uint phase)
 {
+    //swich depending on phase and set one phase floating, one low and one high, toggle phaseout
     switch(phase)
     {
     case 0:
         PHASE_OUT=1;
-        
         PHASE_C_FLOAT = PHASE_FLOAT;
         
         PHASE_B_FLOAT = PHASE_PULL;
@@ -419,7 +443,6 @@ void setOutPhase(uint phase)
         break;
     case 3:
         PHASE_OUT=0;
-        
         PHASE_C_FLOAT = PHASE_FLOAT;
         
         PHASE_A_FLOAT = PHASE_PULL;
@@ -452,19 +475,22 @@ void setOutPhase(uint phase)
  
         break;
         
+    // if inVal is not in [0,6] set all phases to float
     default:
         PHASE_A_FLOAT = PHASE_FLOAT;
         PHASE_B_FLOAT = PHASE_FLOAT;
         PHASE_C_FLOAT = PHASE_FLOAT;
-            
     }
 }
 
-void setInPhase(uint phase)
+//set IOC to correct flance and phase according to section plan
+void setInSection(uint phase)
 {
-    IOCAP = 0; // disactive for 0,1,2
-    IOCAN = 0; // disactive for 0,1,2
+    //disable all IOC (on PORTA)
+    IOCAP = 0; // disactive positive flanc for 0,1,2
+    IOCAN = 0; // disactive negative flanc for 0,1,2
     
+    //according to phase activate right IOC 
     switch(phase)
     {
     case 0: //phase c:   neg
